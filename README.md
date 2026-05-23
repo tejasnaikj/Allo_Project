@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Allo Inventory
 
-## Getting Started
+Inventory reservation system for multi-warehouse retail. Prevents overselling by temporarily holding stock during checkout.
 
-First, run the development server:
+## Local Setup
 
+1. Clone the repo and install dependencies:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/tejasnaikj/Allo_Project.git
+cd Allo_Project
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. Create a `.env` file:
+DATABASE_URL="your-supabase-connection-string"
+REDIS_URL="your-upstash-redis-url"
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. Run migrations and seed:
+```bash
+npx prisma migrate dev
+npm run seed
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Start the dev server:
+```bash
+npm run dev
+```
 
-## Learn More
+## How Expiry Works
 
-To learn more about Next.js, take a look at the following resources:
+Reservations expire after 10 minutes. I use lazy cleanup — on every `GET /api/products` request, expired pending reservations are released and `reservedUnits` is decremented. This means stock becomes available again the next time products are fetched. No background workers or cron jobs needed.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Concurrency
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The `POST /api/reservations` endpoint uses a Postgres `SELECT FOR UPDATE` inside a `db.$transaction` block. This locks the inventory row for the duration of the transaction — if two requests come in simultaneously for the last unit, one waits for the lock and sees 0 available stock, returning a 409.
 
-## Deploy on Vercel
+## Trade-offs
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Lazy expiry means stock isn't freed instantly — only on the next product fetch. A cron job would be more precise but adds infra complexity.
+- No idempotency keys implemented — retried requests could create duplicate reservations.
+- No auth — any user can confirm or release any reservation by ID.
+- Error messages could be more user-friendly on the frontend.
